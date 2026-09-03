@@ -27,12 +27,16 @@ echo "▶ Signing identity: $IDENTITY"
 echo "▶ Compiling universal binary…"
 rm -rf "$DIST"
 mkdir -p "$DIST"
-swift build -c release --arch arm64 --arch x86_64
-BINARY=".build/apple/Products/Release/$APP_NAME"
+swift build -c release --triple arm64-apple-macosx
+swift build -c release --triple x86_64-apple-macosx
+BINARY="$DIST/$APP_NAME-universal"
+lipo -create -output "$BINARY" \
+    ".build/arm64-apple-macosx/release/$APP_NAME" \
+    ".build/x86_64-apple-macosx/release/$APP_NAME"
 
 echo "▶ Assembling bundle…"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
-cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+mv "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 
 echo "▶ Signing…"
