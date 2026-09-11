@@ -40,7 +40,7 @@ in compact mode).
 - **In progress**: resources currently building or waiting on runtime.
 - **All resources**: every resource grouped by Tiltfile label, worst status first.
 - **Re-run Tiltfile**, notification toggle for newly failing resources, compact icon
-  toggle, Refresh, Quit.
+  toggle, **Open at login** toggle, Refresh, Quit.
 
 ## Environment overrides
 
