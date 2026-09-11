@@ -54,4 +54,12 @@ in compact mode).
 
     brew install --cask tjq/tap/tiltbar
 
-Releases are universal, signed, and notarized. Build one with `./release.sh`.
+Releases are universal, signed, and notarized. To cut one, bump
+`CFBundleShortVersionString` in `Info.plist`, then push a matching tag:
+
+    git tag v0.4.0 && git push origin v0.4.0
+
+The `Release` workflow builds and notarizes the zip, publishes the GitHub release,
+and bumps the cask in [tjq/homebrew-tap](https://github.com/tjq/homebrew-tap).
+`./release.sh` does the build locally (needs a Developer ID cert and a
+`notarytool` keychain profile).

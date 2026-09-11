@@ -7,6 +7,9 @@
 #
 # Usage: NOTARY_PROFILE=<profile> ./release.sh
 #   → dist/TiltBar-<version>.zip, universal, signed + notarized + stapled
+#
+# In CI (see .github/workflows/release.yml) the keychain profile is replaced by
+# NOTARY_APPLE_ID / NOTARY_PASSWORD / NOTARY_TEAM_ID.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -46,8 +49,14 @@ codesign --verify --strict "$APP_BUNDLE"
 echo "▶ Zipping…"
 ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP"
 
-echo "▶ Notarizing (profile: $PROFILE)…"
-xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+if [[ -n "${NOTARY_APPLE_ID:-}" ]]; then
+    echo "▶ Notarizing (apple id: $NOTARY_APPLE_ID)…"
+    xcrun notarytool submit "$ZIP" --wait \
+        --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"
+else
+    echo "▶ Notarizing (profile: $PROFILE)…"
+    xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+fi
 
 echo "▶ Stapling…"
 xcrun stapler staple "$APP_BUNDLE"
