@@ -67,15 +67,18 @@ struct Snapshot {
     let resources: [TiltResource]
     let fetchedAt: Date
 
-    /// Counts match the web UI header: Tiltfile, disabled and status-less resources are excluded.
+    /// Counts match the web UI header: disabled and status-less resources are excluded,
+    /// and the Tiltfile only counts when it has failed.
     var counted: [TiltResource] {
-        resources.filter { !$0.isTiltfile && $0.health != .disabled && $0.health != .none }
+        resources.filter {
+            (!$0.isTiltfile || $0.health == .error) && $0.health != .disabled && $0.health != .none
+        }
     }
     var errors: [TiltResource] { counted.filter { $0.health == .error } }
     var pending: [TiltResource] { counted.filter { $0.health == .pending || $0.health == .building } }
     var healthy: [TiltResource] { counted.filter { $0.health == .healthy } }
     var total: Int { counted.count }
-    var needsReload: [TiltResource] { resources.filter { $0.needsReload && !$0.isTiltfile } }
+    var needsReload: [TiltResource] { resources.filter { $0.needsReload } }
     var pendingChanges: [TiltResource] { resources.filter { $0.hasPendingChanges && !$0.disabled } }
 
     static func parse(_ data: Data) throws -> Snapshot {
