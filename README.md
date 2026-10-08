@@ -3,7 +3,7 @@
 macOS menu bar status for a running `tilt up`. Shows the same red / yellow / green
 counts as the Tilt web UI header, lists resources that need a human (failed updates,
 manual-trigger resources with unapplied changes), and lets you trigger them from the
-dropdown.
+dropdown. It can also start, stop, and restart `tilt up` for Tiltfiles you've used before.
 
     ✕ 2  ⚙ 1  ✓ 63/66
 
@@ -27,6 +27,8 @@ Requires the Xcode command line tools (SwiftPM + AppKit); no Xcode project neede
   session token the web UI receives as the `Tilt-Token` cookie. A stale token is
   refreshed automatically after a Tilt restart.
 - "Open in Tilt UI" opens `localhost:10350/r/<resource>/overview`.
+- The running Tiltfile's path and args are read from the apiserver (`tiltfiles/(Tiltfile)`)
+  and remembered as a recent, so a Tilt you started in a terminal shows up there too.
 
 The menu bar shows `◦ tilt off` in gray when the apiserver is unreachable (just `◦`
 in compact mode).
@@ -41,6 +43,21 @@ in compact mode).
 - **All resources**: every resource grouped by Tiltfile label, worst status first.
 - **Re-run Tiltfile**, notification toggle for newly failing resources, compact icon
   toggle, **Open at login** toggle, Refresh, Quit.
+- **Restart Tilt**, **Stop Tilt**, and **Switch Tiltfile** while Tilt is running. When it
+  isn't, **Start Tilt** lists recent Tiltfiles (hold ⌥ to forget one) and
+  **Choose Tiltfile…**.
+
+## Starting and stopping Tilt
+
+TiltBar runs `tilt up --file <Tiltfile> -- <args>` in the Tiltfile's directory through
+your login shell (`$SHELL -l -i -c`), so PATH and the rest of the environment match a
+terminal. Output goes to `~/Library/Logs/TiltBar/tilt.log` (**Show Tilt log**), replaced
+on each start. Tilt keeps running if you quit TiltBar.
+
+Stop sends SIGINT, same as Ctrl-C (SIGTERM after 10s, SIGKILL after 20s if Tilt hangs). It
+works on a Tilt started from a terminal too, found by the process listening on the web
+port. Stopping doesn't run `tilt down`: deployed resources stay up. Restart is stop then
+start with the same Tiltfile and args.
 
 ## Environment overrides
 
