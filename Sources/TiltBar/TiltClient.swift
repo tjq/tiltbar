@@ -46,11 +46,28 @@ final class TiltClient: NSObject, URLSessionDelegate {
     // MARK: status
 
     func fetchResources(completion: @escaping (Result<Snapshot, Error>) -> Void) {
+        apiGet("apis/tilt.dev/v1alpha1/uiresources") { result in
+            completion(result.flatMap { data in Result { try Snapshot.parse(data) } })
+        }
+    }
+
+    /// The Tiltfile the running Tilt was started with (`tilt up -f <path> -- <args>`).
+    func fetchTiltfile(completion: @escaping (TiltfileRef?) -> Void) {
+        apiGet("apis/tilt.dev/v1alpha1/tiltfiles/(Tiltfile)") { result in
+            guard case .success(let data) = result,
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let spec = root["spec"] as? [String: Any],
+                  let path = spec["path"] as? String else { completion(nil); return }
+            completion(TiltfileRef(path: path, args: spec["args"] as? [String] ?? []))
+        }
+    }
+
+    private func apiGet(_ path: String, completion: @escaping (Result<Data, Error>) -> Void) {
         guard let cfg = loadConfig() else {
             completion(.failure(TiltError.notRunning("No Tilt apiserver config at \(configPath)")))
             return
         }
-        var req = URLRequest(url: cfg.server.appendingPathComponent("apis/tilt.dev/v1alpha1/uiresources"))
+        var req = URLRequest(url: cfg.server.appendingPathComponent(path))
         req.setValue("Bearer \(cfg.token)", forHTTPHeaderField: "Authorization")
         session.dataTask(with: req) { data, resp, err in
             if let err = err {
@@ -65,7 +82,7 @@ final class TiltClient: NSObject, URLSessionDelegate {
                 completion(.failure(TiltError.badResponse("apiserver HTTP \(http.statusCode)")))
                 return
             }
-            do { completion(.success(try Snapshot.parse(data))) } catch { completion(.failure(error)) }
+            completion(.success(data))
         }.resume()
     }
 

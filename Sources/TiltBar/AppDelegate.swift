@@ -16,6 +16,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var notificationsReady = false
     private var recentlyTriggered: [String: Date] = [:]
 
+    private let runner: TiltRunner
+    /// Tiltfile of the Tilt we are connected to, read from its apiserver.
+    private var runningTiltfile: TiltfileRef?
+    private var fetchingTiltfile = false
+    private var lifecycle: Lifecycle?
+    /// Why the last start didn't stick: tilt exited, or couldn't be launched at all.
+    private var launchProblem: String?
+
+    private enum Lifecycle {
+        case starting(TiltfileRef), stopping
+        var label: String {
+            switch self {
+            case .starting(let ref): return "Starting Tilt in \(ref.displayName)…"
+            case .stopping: return "Stopping Tilt…"
+            }
+        }
+    }
+
     private let pollInterval: TimeInterval
     private var notifyOnErrors: Bool {
         get { UserDefaults.standard.object(forKey: "notifyOnErrors") as? Bool ?? true }
@@ -37,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let port = Int(env["TILT_PORT"] ?? "") ?? 10350
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         client = TiltClient(webPort: port, configPath: env["TILT_CONFIG"] ?? "\(home)/.tilt-dev/config")
+        runner = TiltRunner(webPort: port)
         pollInterval = Double(env["TILTBAR_POLL_SECONDS"] ?? "") ?? 2
         super.init()
     }
@@ -45,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        runner.onUnexpectedExit = { [weak self] ref, status in self?.tiltExited(ref, status: status) }
         renderTitle()
         setupNotifications()
         poll()
@@ -66,17 +86,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.lastError = nil
                     self.detectNewErrors(snap)
                     self.snapshot = snap
+                    self.launchProblem = nil
+                    if case .starting = self.lifecycle { self.lifecycle = nil }
+                    self.learnRunningTiltfile()
                 case .failure(let err):
                     self.lastError = "\(err)"
                     self.snapshot = nil
                     self.knownErrorNames = []
+                    self.runningTiltfile = nil
                 }
                 self.renderTitle()
-                // Rebuilding tears down every submenu, so only do it when the
-                // content changed and the user is not inside a submenu.
                 let changed = previous != self.snapshot?.resources || previousError != self.lastError
-                guard changed, self.menuIsOpen else { return }
-                if self.openMenuDepth > 1 { self.menuIsStale = true } else { self.rebuildMenu() }
+                if changed { self.rebuildMenuIfOpen() }
+            }
+        }
+    }
+
+    private func learnRunningTiltfile() {
+        guard runningTiltfile == nil, !fetchingTiltfile else { return }
+        fetchingTiltfile = true
+        client.fetchTiltfile { [weak self] ref in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.fetchingTiltfile = false
+                guard let ref = ref, self.snapshot != nil else { return }
+                self.runningTiltfile = ref
+                // Tilts started from a terminal land in the recents too.
+                TiltfileRef.remember(ref)
+                self.rebuildMenuIfOpen()
             }
         }
     }
@@ -94,6 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let title = NSMutableAttributedString()
         func seg(_ text: String, _ color: NSColor) {
             title.append(NSAttributedString(string: text, attributes: [.foregroundColor: color]))
+        }
+        if let busy = lifecycle {
+            if case .starting = busy { seg(compactIcon ? "◦" : "◦ starting", Self.yellow) }
+            else { seg(compactIcon ? "◦" : "◦ stopping", Self.yellow) }
+            statusItem.button?.attributedTitle = title
+            statusItem.button?.toolTip = busy.label
+            return
         }
         guard let snap = snapshot else {
             seg(compactIcon ? "◦" : "◦ tilt off", Self.gray)
@@ -142,20 +186,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Rebuilding tears down every submenu, so defer it while the user is inside one.
+    private func rebuildMenuIfOpen() {
+        guard menuIsOpen else { return }
+        if openMenuDepth > 1 { menuIsStale = true } else { rebuildMenu() }
+    }
+
     private func rebuildMenu() {
         menuIsStale = false
         menu.removeAllItems()
 
+        if let busy = lifecycle {
+            menu.addItem(disabledItem(busy.label))
+            if case .starting = busy, runner.child != nil { menu.addItem(actionItem("Stop Tilt", #selector(stopTilt))) }
+            addShowLogItem()
+            menu.addItem(.separator())
+            addTrailingItems()
+            return
+        }
+
         guard let snap = snapshot else {
-            let item = NSMenuItem(title: "Tilt is not running", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-            if let err = lastError {
-                let detail = NSMenuItem(title: err, action: nil, keyEquivalent: "")
-                detail.isEnabled = false
-                detail.attributedTitle = NSAttributedString(string: err, attributes: [.font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
-                menu.addItem(detail)
-            }
+            menu.addItem(disabledItem("Tilt is not running"))
+            if let err = launchProblem ?? lastError { menu.addItem(detailItem(err)) }
+            if launchProblem != nil { addShowLogItem() }
+            menu.addItem(.separator())
+            menu.addItem(header("Start Tilt"))
+            addStartItems(to: menu, excluding: nil)
             menu.addItem(.separator())
             addTrailingItems()
             return
@@ -163,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let summary = "\(snap.healthy.count)/\(snap.total) healthy · \(snap.errors.count) errors · \(snap.pending.count) pending"
         menu.addItem(disabledItem(summary))
+        if let running = runningTiltfile { menu.addItem(detailItem(running.displayName)) }
         let open = NSMenuItem(title: "Open Tilt UI", action: #selector(openTiltUI), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
@@ -204,7 +261,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        if runningTiltfile != nil { menu.addItem(actionItem("Restart Tilt", #selector(restartTilt))) }
+        menu.addItem(actionItem("Stop Tilt", #selector(stopTilt)))
+        let switchTo = NSMenuItem(title: "Switch Tiltfile", action: nil, keyEquivalent: "")
+        switchTo.submenu = NSMenu()
+        switchTo.submenu?.delegate = self
+        addStartItems(to: switchTo.submenu!, excluding: runningTiltfile)
+        menu.addItem(switchTo)
+        addShowLogItem()
+
+        menu.addItem(.separator())
         addTrailingItems()
+    }
+
+    /// One item per recent Tiltfile (hold ⌥ to forget it), then a file picker. Starting
+    /// one stops whatever Tilt is running first.
+    private func addStartItems(to menu: NSMenu, excluding current: TiltfileRef?) {
+        for ref in TiltfileRef.recents where ref.path != current?.path {
+            let start = actionItem(ref.displayName, #selector(startRecent(_:)))
+            start.representedObject = ref
+            start.toolTip = ref.path
+            menu.addItem(start)
+            let forget = actionItem("Forget \(ref.displayName)", #selector(forgetRecent(_:)))
+            forget.representedObject = ref
+            forget.isAlternate = true
+            forget.keyEquivalentModifierMask = .option
+            menu.addItem(forget)
+        }
+        menu.addItem(actionItem("Choose Tiltfile…", #selector(chooseTiltfile)))
+    }
+
+    /// Shown once TiltBar has started Tilt at least once; a Tilt started in a terminal logs there.
+    private func addShowLogItem() {
+        guard FileManager.default.fileExists(atPath: runner.logURL.path) else { return }
+        menu.addItem(actionItem("Show Tilt log", #selector(showLog)))
     }
 
     private func addTrailingItems() {
@@ -312,6 +402,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    private func detailItem(_ text: String) -> NSMenuItem {
+        let item = disabledItem(text)
+        item.attributedTitle = NSAttributedString(string: text, attributes: [.font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        return item
+    }
+
+    private func actionItem(_ title: String, _ action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
     private func dot(for health: Health) -> NSImage {
         let color: NSColor
         switch health {
@@ -367,6 +469,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
         }
+    }
+
+    // MARK: starting and stopping tilt
+
+    @objc private func startRecent(_ sender: NSMenuItem) {
+        if let ref = sender.representedObject as? TiltfileRef { launch(ref) }
+    }
+
+    @objc private func forgetRecent(_ sender: NSMenuItem) {
+        guard let ref = sender.representedObject as? TiltfileRef else { return }
+        TiltfileRef.recents.removeAll { $0.path == ref.path }
+    }
+
+    @objc private func chooseTiltfile() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose a Tiltfile, or a folder containing one"
+        panel.prompt = "Start Tilt"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        if let recent = TiltfileRef.recents.first {
+            panel.directoryURL = URL(fileURLWithPath: recent.dir).deletingLastPathComponent()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.hasDirectoryPath ? url.appendingPathComponent("Tiltfile").path : url.path
+        // Picking a known Tiltfile keeps its args.
+        launch(TiltfileRef.recents.first { $0.path == path } ?? TiltfileRef(path: path))
+    }
+
+    @objc private func restartTilt() {
+        if let ref = runningTiltfile { launch(ref) }
+    }
+
+    @objc private func stopTilt() {
+        guard let pid = runner.runningPID() else { poll(); return }
+        setLifecycle(.stopping)
+        runner.stop(pid) { [weak self] in
+            self?.setLifecycle(nil)
+            self?.poll()
+        }
+    }
+
+    @objc private func showLog() {
+        NSWorkspace.shared.open(runner.logURL)
+    }
+
+    /// Starts `ref`, stopping the running Tilt first. Restart is launch(runningTiltfile).
+    private func launch(_ ref: TiltfileRef) {
+        guard lifecycle == nil else { return }
+        guard let pid = runner.runningPID() else { start(ref); return }
+        setLifecycle(.stopping)
+        runner.stop(pid) { [weak self] in self?.start(ref) }
+    }
+
+    private func start(_ ref: TiltfileRef) {
+        runningTiltfile = nil
+        do {
+            try runner.start(ref)
+            TiltfileRef.remember(ref)
+            launchProblem = nil
+            setLifecycle(.starting(ref))
+        } catch {
+            launchProblem = "Could not start Tilt: \(error)"
+            setLifecycle(nil)
+            notify(title: "Could not start Tilt", body: "\(error)")
+        }
+        poll()
+    }
+
+    private func tiltExited(_ ref: TiltfileRef, status: Int32) {
+        launchProblem = "Tilt in \(ref.displayName) exited with status \(status)"
+        notify(title: "Tilt exited", body: "\(ref.displayName) exited with status \(status). See Show Tilt log.")
+        if case .starting = lifecycle { setLifecycle(nil) } else { rebuildMenuIfOpen() }
+        poll()
+    }
+
+    private func setLifecycle(_ new: Lifecycle?) {
+        lifecycle = new
+        renderTitle()
+        rebuildMenuIfOpen()
     }
 
     @objc private func toggleNotify() {
