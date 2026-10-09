@@ -18,6 +18,7 @@ anything is failing, `⚙ 1` when something is pending or building, and a lone g
 
 `make run` opens the freshly built copy from `dist/` instead. `make stop` kills it.
 Requires the Xcode command line tools (SwiftPM + AppKit); no Xcode project needed.
+The app icon is drawn by `Icon/make-icon.swift`; `make icon` regenerates `Icon/AppIcon.icns`.
 
 ## How it talks to Tilt
 

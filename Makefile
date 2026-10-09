@@ -3,16 +3,17 @@ BUILD    = .build/release
 BUNDLE   = dist/$(APP).app
 INSTALL  = /Applications/$(APP).app
 
-.PHONY: build bundle install run stop clean
+.PHONY: build bundle install run stop clean icon
 
 build:
 	swift build -c release
 
 bundle: build
 	rm -rf $(BUNDLE)
-	mkdir -p $(BUNDLE)/Contents/MacOS
+	mkdir -p $(BUNDLE)/Contents/MacOS $(BUNDLE)/Contents/Resources
 	cp $(BUILD)/$(APP) $(BUNDLE)/Contents/MacOS/$(APP)
 	cp Info.plist $(BUNDLE)/Contents/Info.plist
+	cp Icon/AppIcon.icns $(BUNDLE)/Contents/Resources/AppIcon.icns
 	codesign --force --sign - $(BUNDLE)
 	@echo "built $(BUNDLE)"
 
@@ -29,6 +30,10 @@ stop:
 
 clean:
 	rm -rf .build dist
+
+# Regenerate Icon/AppIcon.icns after editing Icon/make-icon.swift.
+icon:
+	swift Icon/make-icon.swift Icon/AppIcon.icns
 
 AGENT = $(HOME)/Library/LaunchAgents/com.tjq.tiltbar.plist
 

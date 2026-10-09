@@ -38,9 +38,10 @@ lipo -create -output "$BINARY" \
     ".build/x86_64-apple-macosx/release/$APP_NAME"
 
 echo "▶ Assembling bundle…"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 mv "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
+cp Icon/AppIcon.icns "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
 echo "▶ Signing…"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP_BUNDLE"
