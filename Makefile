@@ -31,7 +31,7 @@ stop:
 clean:
 	rm -rf .build dist
 
-# Regenerate Icon/AppIcon.icns after editing Icon/make-icon.swift.
+# Regenerate Icon/AppIcon.icns (and the README's .png) after editing Icon/make-icon.swift.
 icon:
 	swift Icon/make-icon.swift Icon/AppIcon.icns
 

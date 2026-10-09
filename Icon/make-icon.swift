@@ -1,4 +1,5 @@
 // Draws TiltBar's app icon: red / yellow / green status lights on a tilted bar.
+// Writes the .icns and a .png beside it for the README.
 //
 //   swift Icon/make-icon.swift Icon/AppIcon.icns     (or: make icon)
 import CoreGraphics
@@ -98,3 +99,8 @@ try iconutil.run()
 iconutil.waitUntilExit()
 guard iconutil.terminationStatus == 0 else { exit(iconutil.terminationStatus) }
 print("wrote \(out.path)")
+
+// PNG copy for the README, which GitHub can't render from .icns.
+let readmePNG = out.deletingPathExtension().appendingPathExtension("png")
+png(512, to: readmePNG)
+print("wrote \(readmePNG.path)")
