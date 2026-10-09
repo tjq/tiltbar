@@ -6,6 +6,8 @@
 	<string>TiltBar</string>
 	<key>CFBundleExecutable</key>
 	<string>TiltBar</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.tjq.tiltbar</string>
 	<key>CFBundleName</key>
